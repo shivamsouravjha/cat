@@ -1,6 +1,8 @@
 [build]
   command = "go build -o main ."
   publish = "./main"
+[context.production.environment]
+  GO_VERSION = "1.22.1"
 
 [[redirects]]
   from = "/*"
