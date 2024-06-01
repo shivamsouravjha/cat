@@ -283,22 +283,22 @@ func handleWebhook(c *gin.Context) {
 			return
 		}
 
-		messages, messagesExists := value["messages"].([]interface{})
-		if !messagesExists || len(messages) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "No messages found"})
+		statuses, statusesExists := value["statuses"].([]interface{})
+		if !statusesExists || len(statuses) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No statuses found"})
 			return
 		}
 
-		message := messages[0].(map[string]interface{})
-		if messageType, exists := message["type"].(string); exists && messageType == "image" {
-			imageId := message["image"].(map[string]interface{})["id"].(string)
-			phoneNumber := message["from"].(string)
-			fmt.Println(imageId, phoneNumber, "asd")
-			downloadImage(imageId, phoneNumber)
+		status := statuses[0].(map[string]interface{})
+		if statusType, exists := status["type"].(string); exists && statusType == "image" {
+			imageId := status["id"].(string)
+			imageURL := status["url"].(string)
+			phoneNumber := status["recipient_id"].(string)
+			downloadImage(imageURL, imageId, phoneNumber)
 			nearest := cat(imageId)
 			sendMessage(phoneNumber, nearest)
 		} else {
-			phoneNumber := message["from"].(string)
+			phoneNumber := status["recipient_id"].(string)
 			sendMessage(phoneNumber, "Please send an image.")
 		}
 
@@ -306,25 +306,9 @@ func handleWebhook(c *gin.Context) {
 	}
 }
 
-func downloadImage(imageId, phoneNumber string) {
-	client := resty.New()
-	accessToken := os.Getenv("WHATSAPP_ACCESS_TOKEN")
-	url := fmt.Sprintf("https://graph.facebook.com/v12.0/%s?access_token=%s", imageId, accessToken)
-
-	resp, err := client.R().
-		SetHeader("Authorization", "Bearer "+accessToken).
-		Get(url)
-
-	if err != nil {
-		fmt.Println("Error getting media URL:", err)
-		return
-	}
-
-	mediaUrl := resp.String()
-	fmt.Println("Media URL:", mediaUrl)
-
+func downloadImage(imageURL, imageId, phoneNumber string) {
 	// Download the image
-	response, err := http.Get(mediaUrl)
+	response, err := http.Get(imageURL)
 	if err != nil {
 		fmt.Println("Error downloading image:", err)
 		return
@@ -332,7 +316,8 @@ func downloadImage(imageId, phoneNumber string) {
 	defer response.Body.Close()
 
 	// Create the file
-	file, err := os.Create("downloaded_image.jpg")
+	filePath := "downloaded_image.jpg"
+	file, err := os.Create(filePath)
 	if err != nil {
 		fmt.Println("Error creating file:", err)
 		return
