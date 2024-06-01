@@ -136,7 +136,11 @@ func main() {
 	{
 		handlers.GET("/cat", cat) //checked->
 	}
-	err := routes.Run(":8081")
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8081"
+	}
+	err := routes.Run(":" + port)
 	if err != nil {
 		fmt.Println(err.Error())
 	}
