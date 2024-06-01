@@ -8,15 +8,24 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/go-resty/resty/v2"
 
 	"github.com/corona10/goimagehash"
 	"github.com/gin-gonic/gin"
 	"github.com/kyroy/kdtree"
 	"github.com/kyroy/kdtree/points"
 	"gopkg.in/go-dedup/simhash.v2"
+)
+
+var (
+	verifyToken   = os.Getenv("WHATSAPP_VERIFY_TOKEN")
+	accessToken   = os.Getenv("WHATSAPP_ACCESS_TOKEN")
+	phoneNumberId = os.Getenv("WHATSAPP_PHONE_NUMBER_ID")
 )
 
 // ImageHash wraps the hash and filepath
@@ -223,4 +232,73 @@ func cat(c *gin.Context) {
 	fmt.Println("Hashes written to file successfully.")
 	c.JSON(400, "no")
 
+}
+
+func verifyWebhook(c *gin.Context) {
+	mode := c.Query("hub.mode")
+	token := c.Query("hub.verify_token")
+	challenge := c.Query("hub.challenge")
+
+	if mode == "subscribe" && token == verifyToken {
+		c.String(http.StatusOK, challenge)
+	} else {
+		c.String(http.StatusForbidden, "Verification failed")
+	}
+}
+
+func handleWebhook(c *gin.Context) {
+	var body map[string]interface{}
+	if err := c.BindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	entry := body["entry"].([]interface{})[0].(map[string]interface{})
+	changes := entry["changes"].([]interface{})[0].(map[string]interface{})
+	value := changes["value"].(map[string]interface{})
+	messages := value["messages"].([]interface{})[0].(map[string]interface{})
+
+	if messageType, exists := messages["type"].(string); exists && messageType == "image" {
+		imageId := messages["image"].(map[string]interface{})["id"].(string)
+		phoneNumber := messages["from"].(string)
+		downloadImage(imageId, phoneNumber)
+		sendMessage(phoneNumber, "Image received and saved.")
+	} else {
+		phoneNumber := messages["from"].(string)
+		sendMessage(phoneNumber, "Please send an image.")
+	}
+
+	c.Status(http.StatusOK)
+}
+
+func downloadImage(imageId, phoneNumber string) {
+	client := resty.New()
+	resp, err := client.R().
+		SetAuthToken(accessToken).
+		SetOutput(filepath.Join("images", fmt.Sprintf("%s.jpg", imageId))).
+		Get(fmt.Sprintf("https://graph.facebook.com/v13.0/%s", imageId))
+
+	if err != nil {
+		fmt.Printf("Error downloading image: %v\n", err)
+	} else if resp.IsError() {
+		fmt.Printf("Error response: %v\n", resp)
+	} else {
+		fmt.Printf("Image saved for phone number %s\n", phoneNumber)
+	}
+}
+
+func sendMessage(phoneNumber, message string) {
+	client := resty.New()
+	_, err := client.R().
+		SetAuthToken(accessToken).
+		SetBody(map[string]interface{}{
+			"messaging_product": "whatsapp",
+			"to":                phoneNumber,
+			"text":              map[string]string{"body": message},
+		}).
+		Post(fmt.Sprintf("https://graph.facebook.com/v13.0/%s/messages", phoneNumberId))
+
+	if err != nil {
+		fmt.Printf("Error sending message: %v\n", err)
+	}
 }
