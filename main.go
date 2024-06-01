@@ -130,7 +130,7 @@ func main() {
 	handlers := routes.Group("api")
 	{
 		handlers.GET("/cat", cat) //checked->
-		handlers.GET("/verifyWebhook", verifyWebhook)
+		// handlers.GET("/verifyWebhook", verifyWebhook)
 		handlers.GET("/handleWebhook", handleWebhook)
 	}
 	port := os.Getenv("PORT")
@@ -234,25 +234,24 @@ func cat(c *gin.Context) {
 	c.JSON(400, "no")
 
 }
-
-func verifyWebhook(c *gin.Context) {
+func handleWebhook(c *gin.Context) {
 	err := godotenv.Load()
 	if err != nil {
 		fmt.Println("Error loading .env file")
+		c.String(http.StatusInternalServerError, "Internal Server Error")
+		return
 	}
+
 	mode := c.Query("hub.mode")
 	token := c.Query("hub.verify_token")
 	challenge := c.Query("hub.challenge")
 	verifyToken := os.Getenv("WHATSAPP_VERIFY_TOKEN")
-	fmt.Println(mode, token, challenge, verifyToken)
+
 	if mode == "subscribe" && token == verifyToken {
 		c.String(http.StatusOK, challenge)
-	} else {
-		c.String(http.StatusForbidden, "Verification failed")
+		return
 	}
-}
 
-func handleWebhook(c *gin.Context) {
 	var body map[string]interface{}
 	if err := c.BindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
