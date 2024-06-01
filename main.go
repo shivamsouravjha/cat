@@ -131,6 +131,7 @@ func main() {
 		handlers.GET("/cat", cat) //checked->
 		// handlers.GET("/verifyWebhook", verifyWebhook)
 		handlers.GET("/handleWebhook", handleWebhook)
+		handlers.POST("/handleWebhook", handleWebhook)
 	}
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -245,7 +246,7 @@ func handleWebhook(c *gin.Context) {
 	token := c.Query("hub.verify_token")
 	challenge := c.Query("hub.challenge")
 	verifyToken := os.Getenv("WHATSAPP_VERIFY_TOKEN")
-	fmt.Println(mode, token, challenge, verifyToken)
+	fmt.Println(mode, token, challenge, verifyToken, "here")
 	if mode == "subscribe" && token == verifyToken {
 		c.String(http.StatusOK, challenge)
 		return
