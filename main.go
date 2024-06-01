@@ -200,7 +200,9 @@ func hitit() {
 
 func cat(imageID string) string {
 	var anjaliHash ImageHash
-	anjali := "./downloaded_image.jpg"
+	filePath := filepath.Join(".", "downloaded_image.jpg")
+	absFilePath, _ := filepath.Abs(filePath)
+	anjali := absFilePath
 
 	// var imageHashes []ImageHash
 	err := filepath.Walk(anjali, func(path string, info os.FileInfo, err error) error {
