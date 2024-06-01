@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"image"
 	_ "image/jpeg"
@@ -334,8 +335,17 @@ func downloadImage(imageId, phoneNumber string) {
 		fmt.Println("Error getting media URL:", err)
 		return
 	}
-
-	mediaUrl := resp.String()
+	var mediaData map[string]interface{}
+	err = json.Unmarshal(resp.Body(), &mediaData)
+	if err != nil {
+		fmt.Println("Error parsing media URL JSON:", err)
+		return
+	}
+	mediaUrl, urlExists := mediaData["url"].(string)
+	if !urlExists {
+		fmt.Println("No URL found in media data")
+		return
+	}
 	fmt.Println("Media URL:", mediaUrl)
 
 	// Download the image
@@ -347,7 +357,14 @@ func downloadImage(imageId, phoneNumber string) {
 	defer response.Body.Close()
 
 	// Create the file
-	file, err := os.Create("downloaded_image.jpg")
+	filePath := filepath.Join(".", "downloaded_image.jpg")
+	absFilePath, err := filepath.Abs(filePath)
+	if err != nil {
+		fmt.Println("Error getting absolute file path:", err)
+		return
+	}
+
+	file, err := os.Create(absFilePath)
 	if err != nil {
 		fmt.Println("Error creating file:", err)
 		return
@@ -361,7 +378,7 @@ func downloadImage(imageId, phoneNumber string) {
 		return
 	}
 
-	fmt.Printf("Downloaded image for phone number: %s\n", phoneNumber)
+	fmt.Printf("Downloaded image for phone number: %s to path: %s\n", phoneNumber, absFilePath)
 }
 
 func sendMessage(phoneNumber, message string) {
