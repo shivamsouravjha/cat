@@ -337,17 +337,23 @@ func downloadImage(imageId, phoneNumber string) {
 		fmt.Println("Error getting media URL:", err)
 		return
 	}
+
+	// Log the full response body
+	fmt.Printf("Media URL Response: %s\n", resp.String())
+
 	var mediaData map[string]interface{}
 	err = json.Unmarshal(resp.Body(), &mediaData)
 	if err != nil {
 		fmt.Println("Error parsing media URL JSON:", err)
 		return
 	}
+
 	mediaUrl, urlExists := mediaData["url"].(string)
 	if !urlExists {
 		fmt.Println("No URL found in media data")
 		return
 	}
+
 	fmt.Println("Media URL:", mediaUrl)
 
 	// Download the image
@@ -357,6 +363,12 @@ func downloadImage(imageId, phoneNumber string) {
 		return
 	}
 	defer response.Body.Close()
+
+	// Check if response status is OK
+	if response.StatusCode != http.StatusOK {
+		fmt.Printf("Failed to download image, status code: %d\n", response.StatusCode)
+		return
+	}
 
 	// Create the file
 	filePath := filepath.Join(".", "downloaded_image.jpg")
