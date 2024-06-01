@@ -237,6 +237,7 @@ func cat(imageID string) string {
 
 	return nearest[0].(*HashPoint).filePath
 }
+
 func handleWebhook(c *gin.Context) {
 	// err := godotenv.Load()
 	// if err != nil {
@@ -249,35 +250,60 @@ func handleWebhook(c *gin.Context) {
 	token := c.Query("hub.verify_token")
 	challenge := c.Query("hub.challenge")
 	verifyToken := os.Getenv("WHATSAPP_VERIFY_TOKEN")
-	fmt.Println(mode, token, challenge, verifyToken, "here")
+
 	if mode == "subscribe" && token == verifyToken {
 		c.String(http.StatusOK, challenge)
 		return
 	}
 
-	var body map[string]interface{}
-	if err := c.BindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+	if c.Request.Method == http.MethodPost {
+		var body map[string]interface{}
+		if err := c.BindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		fmt.Printf("Received Webhook: %v\n", body)
+
+		entry, entryExists := body["entry"].([]interface{})
+		if !entryExists || len(entry) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No entry found"})
+			return
+		}
+
+		changes, changesExists := entry[0].(map[string]interface{})["changes"].([]interface{})
+		if !changesExists || len(changes) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No changes found"})
+			return
+		}
+
+		value, valueExists := changes[0].(map[string]interface{})["value"].(map[string]interface{})
+		if !valueExists {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No value found"})
+			return
+		}
+
+		messages, messagesExists := value["messages"].([]interface{})
+		if !messagesExists || len(messages) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No messages found"})
+			return
+		}
+
+		message := messages[0].(map[string]interface{})
+		if messageType, exists := message["type"].(string); exists && messageType == "image" {
+			imageId := message["image"].(map[string]interface{})["id"].(string)
+			phoneNumber := message["from"].(string)
+			fmt.Println(imageId, phoneNumber, "asd")
+			downloadImage(imageId, phoneNumber)
+			nearest := cat(imageId)
+			sendMessage(phoneNumber, nearest)
+		} else {
+			phoneNumber := message["from"].(string)
+			sendMessage(phoneNumber, "Please send an image.")
+		}
+
+		c.Status(http.StatusOK)
 	}
-
-	entry := body["entry"].([]interface{})[0].(map[string]interface{})
-	changes := entry["changes"].([]interface{})[0].(map[string]interface{})
-	value := changes["value"].(map[string]interface{})
-	messages := value["messages"].([]interface{})[0].(map[string]interface{})
-
-	if messageType, exists := messages["type"].(string); exists && messageType == "image" {
-		imageId := messages["image"].(map[string]interface{})["id"].(string)
-		phoneNumber := messages["from"].(string)
-		downloadImage(imageId, phoneNumber)
-		nearest := cat(imageId)
-		sendMessage(phoneNumber, nearest)
-	} else {
-		phoneNumber := messages["from"].(string)
-		sendMessage(phoneNumber, "Please send an image.")
-	}
-
-	c.Status(http.StatusOK)
 }
 
 func downloadImage(imageId, phoneNumber string) {
