@@ -1,0 +1,8 @@
+[build]
+  command = "go build -o main ."
+  publish = "./main"
+
+[[redirects]]
+  from = "/*"
+  to = "/"
+  status = 200
