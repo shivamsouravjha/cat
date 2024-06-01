@@ -17,15 +17,10 @@ import (
 
 	"github.com/corona10/goimagehash"
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 	"github.com/kyroy/kdtree"
 	"github.com/kyroy/kdtree/points"
 	"gopkg.in/go-dedup/simhash.v2"
-)
-
-var (
-	verifyToken   = os.Getenv("WHATSAPP_VERIFY_TOKEN")
-	accessToken   = os.Getenv("WHATSAPP_ACCESS_TOKEN")
-	phoneNumberId = os.Getenv("WHATSAPP_PHONE_NUMBER_ID")
 )
 
 // ImageHash wraps the hash and filepath
@@ -135,6 +130,8 @@ func main() {
 	handlers := routes.Group("api")
 	{
 		handlers.GET("/cat", cat) //checked->
+		handlers.GET("/verifyWebhook", verifyWebhook)
+		handlers.GET("/handleWebhook", handleWebhook)
 	}
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -239,10 +236,15 @@ func cat(c *gin.Context) {
 }
 
 func verifyWebhook(c *gin.Context) {
+	err := godotenv.Load()
+	if err != nil {
+		fmt.Println("Error loading .env file")
+	}
 	mode := c.Query("hub.mode")
 	token := c.Query("hub.verify_token")
 	challenge := c.Query("hub.challenge")
-
+	verifyToken := os.Getenv("WHATSAPP_VERIFY_TOKEN")
+	fmt.Println(mode, token, challenge, verifyToken)
 	if mode == "subscribe" && token == verifyToken {
 		c.String(http.StatusOK, challenge)
 	} else {
@@ -276,6 +278,8 @@ func handleWebhook(c *gin.Context) {
 }
 
 func downloadImage(imageId, phoneNumber string) {
+	accessToken := os.Getenv("WHATSAPP_ACCESS_TOKEN")
+
 	client := resty.New()
 	resp, err := client.R().
 		SetAuthToken(accessToken).
@@ -292,6 +296,9 @@ func downloadImage(imageId, phoneNumber string) {
 }
 
 func sendMessage(phoneNumber, message string) {
+	accessToken := os.Getenv("WHATSAPP_ACCESS_TOKEN")
+	phoneNumberId := os.Getenv("WHATSAPP_PHONE_NUMBER_ID")
+
 	client := resty.New()
 	_, err := client.R().
 		SetAuthToken(accessToken).
