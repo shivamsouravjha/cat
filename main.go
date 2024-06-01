@@ -17,7 +17,6 @@ import (
 
 	"github.com/corona10/goimagehash"
 	"github.com/gin-gonic/gin"
-	"github.com/joho/godotenv"
 	"github.com/kyroy/kdtree"
 	"github.com/kyroy/kdtree/points"
 	"gopkg.in/go-dedup/simhash.v2"
@@ -235,12 +234,12 @@ func cat(c *gin.Context) {
 
 }
 func handleWebhook(c *gin.Context) {
-	err := godotenv.Load()
-	if err != nil {
-		fmt.Println("Error loading .env file")
-		c.String(http.StatusInternalServerError, "Internal Server Error")
-		return
-	}
+	// err := godotenv.Load()
+	// if err != nil {
+	// 	fmt.Println("Error loading .env file")
+	// 	c.String(http.StatusInternalServerError, "Internal Server Error")
+	// 	return
+	// }
 
 	mode := c.Query("hub.mode")
 	token := c.Query("hub.verify_token")
