@@ -298,8 +298,9 @@ func handleWebhook(c *gin.Context) {
 			nearest := cat(imageId)
 			sendMessage(phoneNumber, nearest)
 		} else {
-			phoneNumber := status["recipient_id"].(string)
-			sendMessage(phoneNumber, "Please send an image.")
+			fmt.Println(statuses...)
+			// phoneNumber := status["recipient_id"].(string)
+			// sendMessage(phoneNumber, "Please send an image.")
 		}
 
 		c.Status(http.StatusOK)
