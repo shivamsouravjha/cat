@@ -7,6 +7,7 @@ import (
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -128,7 +129,7 @@ func main() {
 	routes := gin.New()
 	handlers := routes.Group("api")
 	{
-		handlers.GET("/cat", cat) //checked->
+		// handlers.GET("/cat", cat) //checked->
 		// handlers.GET("/verifyWebhook", verifyWebhook)
 		handlers.GET("/handleWebhook", handleWebhook)
 		handlers.POST("/handleWebhook", handleWebhook)
@@ -196,9 +197,9 @@ func hitit() {
 	}
 }
 
-func cat(c *gin.Context) {
+func cat(imageID string) string {
 	var anjaliHash ImageHash
-	anjali := "/Users/shivamsouravjha/cat/shivam.jpg"
+	anjali := "./downloaded_image.jpg"
 
 	// var imageHashes []ImageHash
 	err := filepath.Walk(anjali, func(path string, info os.FileInfo, err error) error {
@@ -225,14 +226,16 @@ func cat(c *gin.Context) {
 	// Find the nearest neighbor
 	nearest := tree.KNN(points, 1) // Adjust the query as needed
 	fmt.Printf("Nearest hash to %v is %v\n", nearest[0].(*HashPoint).filePath)
-	c.JSON(200, nearest[0].(*HashPoint).filePath)
-	return
 
 	fmt.Println("KD-tree search completed.")
 
 	fmt.Println("Hashes written to file successfully.")
-	c.JSON(400, "no")
+	err = os.Remove(anjali)
+	if err != nil {
+		log.Printf("Failed to delete image %s: %v", anjali, err)
+	}
 
+	return nearest[0].(*HashPoint).filePath
 }
 func handleWebhook(c *gin.Context) {
 	// err := godotenv.Load()
@@ -267,7 +270,8 @@ func handleWebhook(c *gin.Context) {
 		imageId := messages["image"].(map[string]interface{})["id"].(string)
 		phoneNumber := messages["from"].(string)
 		downloadImage(imageId, phoneNumber)
-		sendMessage(phoneNumber, "Image received and saved.")
+		nearest := cat(imageId)
+		sendMessage(phoneNumber, nearest)
 	} else {
 		phoneNumber := messages["from"].(string)
 		sendMessage(phoneNumber, "Please send an image.")
@@ -277,27 +281,51 @@ func handleWebhook(c *gin.Context) {
 }
 
 func downloadImage(imageId, phoneNumber string) {
-	accessToken := os.Getenv("WHATSAPP_ACCESS_TOKEN")
-
 	client := resty.New()
+	accessToken := os.Getenv("WHATSAPP_ACCESS_TOKEN")
+	url := fmt.Sprintf("https://graph.facebook.com/v12.0/%s?access_token=%s", imageId, accessToken)
+
 	resp, err := client.R().
-		SetAuthToken(accessToken).
-		SetOutput(filepath.Join("images", fmt.Sprintf("%s.jpg", imageId))).
-		Get(fmt.Sprintf("https://graph.facebook.com/v13.0/%s", imageId))
+		SetHeader("Authorization", "Bearer "+accessToken).
+		Get(url)
 
 	if err != nil {
-		fmt.Printf("Error downloading image: %v\n", err)
-	} else if resp.IsError() {
-		fmt.Printf("Error response: %v\n", resp)
-	} else {
-		fmt.Printf("Image saved for phone number %s\n", phoneNumber)
+		fmt.Println("Error getting media URL:", err)
+		return
 	}
+
+	mediaUrl := resp.String()
+	fmt.Println("Media URL:", mediaUrl)
+
+	// Download the image
+	response, err := http.Get(mediaUrl)
+	if err != nil {
+		fmt.Println("Error downloading image:", err)
+		return
+	}
+	defer response.Body.Close()
+
+	// Create the file
+	file, err := os.Create("downloaded_image.jpg")
+	if err != nil {
+		fmt.Println("Error creating file:", err)
+		return
+	}
+	defer file.Close()
+
+	// Write the body to file
+	_, err = io.Copy(file, response.Body)
+	if err != nil {
+		fmt.Println("Error saving image:", err)
+		return
+	}
+
+	fmt.Printf("Downloaded image for phone number: %s\n", phoneNumber)
 }
 
 func sendMessage(phoneNumber, message string) {
 	accessToken := os.Getenv("WHATSAPP_ACCESS_TOKEN")
 	phoneNumberId := os.Getenv("WHATSAPP_PHONE_NUMBER_ID")
-
 	client := resty.New()
 	_, err := client.R().
 		SetAuthToken(accessToken).
