@@ -2,21 +2,28 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
+	"strings"
 	"time"
 
+	"github.com/cloudinary/cloudinary-go"
+	"github.com/cloudinary/cloudinary-go/api/uploader"
+	"github.com/cloudinary/cloudinary-go/config"
+	"github.com/gin-contrib/cors"
 	"github.com/go-resty/resty/v2"
+	"github.com/google/uuid"
 
 	"github.com/corona10/goimagehash"
 	"github.com/gin-gonic/gin"
@@ -126,15 +133,46 @@ func LoadHashesFromFile(filePath string) ([]*HashPoint, error) {
 
 var tree *kdtree.KDTree
 
+var (
+	Cloudinary *cloudinary.Cloudinary
+)
+
+func CloudInit() error {
+	Cloudinary = &cloudinary.Cloudinary{}
+	Cloudinary.Config = config.Configuration{
+		Cloud: config.Cloud{
+			CloudName: os.Getenv("CLOUD_NAME"),
+			APIKey:    os.Getenv("API_KEY"),
+			APISecret: os.Getenv("API_SECRET"),
+		},
+	}
+	Cloudinary, _ = cloudinary.NewFromParams(Cloudinary.Config.Cloud.CloudName, Cloudinary.Config.Cloud.APIKey, Cloudinary.Config.Cloud.APISecret)
+
+	return nil
+}
+
+func Client() *cloudinary.Cloudinary {
+	return Cloudinary
+}
 func main() {
+	// CloudInit()
+	// uploadCloud()
 	hitit()
+
 	routes := gin.New()
+	corsConfig := cors.DefaultConfig()
+	corsConfig.AllowAllOrigins = true
+	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type"}
+	corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
+
+	routes.Use(cors.New(corsConfig))
+
 	handlers := routes.Group("api")
 	{
 		// handlers.GET("/cat", cat) //checked->
 		// handlers.GET("/verifyWebhook", verifyWebhook)
 		// handlers.GET("/handleWebhook", handleWebhook)
-		handlers.GET("/cat/:hash", cat)
+		handlers.POST("/cat", cat)
 	}
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -143,6 +181,55 @@ func main() {
 	err := routes.Run(":" + port)
 	if err != nil {
 		fmt.Println(err.Error())
+	}
+}
+
+func uploadCloud() {
+	imagesDir := "/Users/shivamsouravjha/cat/images"
+	outputFile := "image_hashes.txt"
+	var count int
+
+	var imageHashes []ImageHash
+	err := filepath.Walk(imagesDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && !strings.HasSuffix(info.Name(), ".jpg.cat") {
+			fileName, err := Client().Upload.Upload(context.Background(), path, uploader.UploadParams{PublicID: info.Name()})
+			if err != nil {
+				fmt.Println(err.Error())
+			}
+			fmt.Println(fileName.URL)
+			hash, err := HashImage(path)
+			if err != nil {
+				log.Printf("Failed to hash image %s: %v", path, err)
+				return nil // Continue processing other files
+			}
+			imageHashes = append(imageHashes, ImageHash{FilePath: fileName.URL, Hash: hash})
+			count++
+
+			// Write to file every 10,000 images
+			// if count >= 10000 {
+			if err = WriteHashesToFile(imageHashes, outputFile); err != nil {
+				log.Printf("Failed to write hashes to file: %v", err)
+			}
+			imageHashes = []ImageHash{} // Reset slice
+			// count = 0
+			// }
+		}
+		return nil
+	})
+
+	if err != nil {
+		log.Fatalf("Failed to process images: %v", err)
+	}
+
+	//Write any remaining hashes that didn't make up a full chunk
+
+	if len(imageHashes) > 0 {
+		if err = WriteHashesToFile(imageHashes, outputFile); err != nil {
+			log.Fatalf("Failed to write remaining hashes to file: %v", err)
+		}
 	}
 }
 func hitit() {
@@ -200,37 +287,49 @@ func hitit() {
 }
 
 func cat(c *gin.Context) {
-	anjaliHash, err := strconv.ParseUint(c.Params.ByName("hash"), 16, 64)
+	file, _, err := c.Request.FormFile("image")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid hash value"})
+		c.String(http.StatusBadRequest, fmt.Sprintf("get form err: %s", err.Error()))
 		return
 	}
+	defer file.Close()
 
-	// var anjaliHash ImageHash
-	filePath := filepath.Join(".", "downloaded_image.jpg")
-	absFilePath, _ := filepath.Abs(filePath)
-	anjali := absFilePath
+	// Generate a random UUID for the filename
+	uuid := uuid.New()
+	filename := fmt.Sprintf("./%s.jpg", uuid.String())
 
-	// // var imageHashes []ImageHash
-	// err := filepath.Walk(anjali, func(path string, info os.FileInfo, err error) error {
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	if !info.IsDir() && !strings.HasSuffix(info.Name(), ".jpg.cat") {
-	// 		hash, err := HashImage(path)
-	// 		if err != nil {
-	// 			log.Printf("Failed to hash image %s: %v", path, err)
-	// 			return nil // Continue processing other files
-	// 		}
-	// 		anjaliHash = ImageHash{
-	// 			FilePath: path,
-	// 			Hash:     hash,
-	// 		}
-	// 	}
-	// 	return nil
-	// })
+	out, err := os.Create(filename)
+	if err != nil {
+		c.String(http.StatusInternalServerError, fmt.Sprintf("create file err: %s", err.Error()))
+		return
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, file)
+	if err != nil {
+		c.String(http.StatusInternalServerError, fmt.Sprintf("save file err: %s", err.Error()))
+		return
+	}
+	var anjaliHash ImageHash
+	err = filepath.Walk(filename, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && !strings.HasSuffix(info.Name(), ".jpg.cat") {
+			hash, err := HashImage(path)
+			if err != nil {
+				log.Printf("Failed to hash image %s: %v", path, err)
+				return nil // Continue processing other files
+			}
+			anjaliHash = ImageHash{
+				FilePath: path,
+				Hash:     hash,
+			}
+		}
+		return nil
+	})
 	// fmt.Println(err)
-	var points = NewHashPoint(anjali, anjaliHash)
+	var points = NewHashPoint(filename, anjaliHash.Hash)
 
 	fmt.Println("herehereherehereherehereherehereherehereherehereherehereherehereherehereherehere")
 	// Find the nearest neighbor
@@ -240,10 +339,10 @@ func cat(c *gin.Context) {
 	fmt.Println("KD-tree search completed.")
 
 	fmt.Println("Hashes written to file successfully.")
-	// err = os.Remove(anjali)
-	// if err != nil {
-	// 	log.Printf("Failed to delete image %s: %v", anjali, err)
-	// }
+	err = os.Remove(filename)
+	if err != nil {
+		log.Printf("Failed to delete image %s: %v", filename, err)
+	}
 
 	c.JSON(200, nearest[0].(*HashPoint).filePath)
 }
