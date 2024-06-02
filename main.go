@@ -8,12 +8,13 @@ import (
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
-	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
+	"strconv"
+	"time"
 
 	"github.com/go-resty/resty/v2"
 
@@ -132,8 +133,8 @@ func main() {
 	{
 		// handlers.GET("/cat", cat) //checked->
 		// handlers.GET("/verifyWebhook", verifyWebhook)
-		handlers.GET("/handleWebhook", handleWebhook)
-		handlers.POST("/handleWebhook", handleWebhook)
+		// handlers.GET("/handleWebhook", handleWebhook)
+		handlers.GET("/cat/:hash", cat)
 	}
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -198,32 +199,38 @@ func hitit() {
 	}
 }
 
-func cat(imageID string) string {
-	var anjaliHash ImageHash
+func cat(c *gin.Context) {
+	anjaliHash, err := strconv.ParseUint(c.Params.ByName("hash"), 16, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid hash value"})
+		return
+	}
+
+	// var anjaliHash ImageHash
 	filePath := filepath.Join(".", "downloaded_image.jpg")
 	absFilePath, _ := filepath.Abs(filePath)
 	anjali := absFilePath
 
-	// var imageHashes []ImageHash
-	err := filepath.Walk(anjali, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() && !strings.HasSuffix(info.Name(), ".jpg.cat") {
-			hash, err := HashImage(path)
-			if err != nil {
-				log.Printf("Failed to hash image %s: %v", path, err)
-				return nil // Continue processing other files
-			}
-			anjaliHash = ImageHash{
-				FilePath: path,
-				Hash:     hash,
-			}
-		}
-		return nil
-	})
-	fmt.Println(err)
-	var points = NewHashPoint(anjali, anjaliHash.Hash)
+	// // var imageHashes []ImageHash
+	// err := filepath.Walk(anjali, func(path string, info os.FileInfo, err error) error {
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	if !info.IsDir() && !strings.HasSuffix(info.Name(), ".jpg.cat") {
+	// 		hash, err := HashImage(path)
+	// 		if err != nil {
+	// 			log.Printf("Failed to hash image %s: %v", path, err)
+	// 			return nil // Continue processing other files
+	// 		}
+	// 		anjaliHash = ImageHash{
+	// 			FilePath: path,
+	// 			Hash:     hash,
+	// 		}
+	// 	}
+	// 	return nil
+	// })
+	// fmt.Println(err)
+	var points = NewHashPoint(anjali, anjaliHash)
 
 	fmt.Println("herehereherehereherehereherehereherehereherehereherehereherehereherehereherehere")
 	// Find the nearest neighbor
@@ -233,182 +240,208 @@ func cat(imageID string) string {
 	fmt.Println("KD-tree search completed.")
 
 	fmt.Println("Hashes written to file successfully.")
-	err = os.Remove(anjali)
-	if err != nil {
-		log.Printf("Failed to delete image %s: %v", anjali, err)
-	}
-
-	return nearest[0].(*HashPoint).filePath
-}
-
-func handleWebhook(c *gin.Context) {
-	// err := godotenv.Load()
+	// err = os.Remove(anjali)
 	// if err != nil {
-	// 	fmt.Println("Error loading .env file")
-	// 	c.String(http.StatusInternalServerError, "Internal Server Error")
-	// 	return
+	// 	log.Printf("Failed to delete image %s: %v", anjali, err)
 	// }
 
-	mode := c.Query("hub.mode")
-	token := c.Query("hub.verify_token")
-	challenge := c.Query("hub.challenge")
-	verifyToken := os.Getenv("WHATSAPP_VERIFY_TOKEN")
-	if mode == "subscribe" && token == verifyToken {
-		c.String(http.StatusOK, challenge)
-		return
-	}
-
-	if c.Request.Method == http.MethodPost {
-		var body map[string]interface{}
-		if err := c.BindJSON(&body); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		fmt.Printf("Received Webhook: %v\n", body)
-
-		entry, entryExists := body["entry"].([]interface{})
-		if !entryExists || len(entry) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "No entry found"})
-			return
-		}
-
-		changes, changesExists := entry[0].(map[string]interface{})["changes"].([]interface{})
-		if !changesExists || len(changes) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "No changes found"})
-			return
-		}
-
-		value, valueExists := changes[0].(map[string]interface{})["value"].(map[string]interface{})
-		if !valueExists {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "No value found"})
-			return
-		}
-
-		messages, messagesExists := value["messages"].([]interface{})
-		if !messagesExists || len(messages) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "No messages found"})
-			return
-		}
-
-		message := messages[0].(map[string]interface{})
-		messageType, messageTypeExists := message["type"].(string)
-		if !messageTypeExists || messageType != "image" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Message is not an image"})
-			return
-		}
-
-		image, imageExists := message["image"].(map[string]interface{})
-		if !imageExists {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "No image found in message"})
-			return
-		}
-
-		imageId, idExists := image["id"].(string)
-		if !idExists {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "No image ID found"})
-			return
-		}
-
-		phoneNumber, phoneExists := message["from"].(string)
-		if !phoneExists {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "No phone number found"})
-			return
-		}
-
-		downloadImage(imageId, phoneNumber)
-		nearest := cat(imageId)
-		sendMessage(phoneNumber, nearest)
-
-		c.Status(http.StatusOK)
-	}
+	c.JSON(200, nearest[0].(*HashPoint).filePath)
 }
 
-func downloadImage(imageId, phoneNumber string) {
-	client := resty.New()
+func downloadImage(mediaUrl, phoneNumber string) error {
 	accessToken := os.Getenv("WHATSAPP_ACCESS_TOKEN")
-	url := fmt.Sprintf("https://graph.facebook.com/v12.0/%s?access_token=%s", imageId, accessToken)
+	client := resty.New()
 
+	var downloadResp *resty.Response
+	var err error
+
+	// Retry mechanism (consider increasing retries based on needs)
+	for retries := 0; retries < 3; retries++ {
+		downloadResp, err = client.R().
+			SetHeader("Authorization", "Bearer "+accessToken).
+			Get(mediaUrl)
+
+		if err == nil && downloadResp.StatusCode() == http.StatusOK {
+			break
+		}
+
+		fmt.Printf("Retrying download... attempt %d\n", retries+1)
+		time.Sleep(2 * time.Second) // Wait for 2 seconds before retrying
+	}
+
+	if err != nil {
+		return fmt.Errorf("error downloading image: %v", err)
+	}
+
+	if downloadResp.StatusCode() != http.StatusOK {
+		return fmt.Errorf("failed to download image, status code: %d", downloadResp.StatusCode())
+	}
+
+	filePath := filepath.Join(".", "downloaded_image.jpg")
+	absFilePath, err := filepath.Abs(filePath)
+	if err != nil {
+		return fmt.Errorf("error getting absolute file path: %v", err)
+	}
+
+	file, err := os.Create(absFilePath)
+	if err != nil {
+		return fmt.Errorf("error creating file: %v", err)
+	}
+	defer file.Close()
+
+	// Read the entire response body (consider chunking for large files)
+	bodyBytes, err := ioutil.ReadAll(downloadResp.RawBody())
+	if err != nil {
+		return fmt.Errorf("error reading response body: %v", err)
+	}
+
+	// Write the body to file
+	_, err = file.Write(bodyBytes)
+	if err != nil {
+		return fmt.Errorf("error saving image: %v", err)
+	}
+
+	fmt.Printf("Downloaded image for phone number: %s to path: %s\n", phoneNumber, absFilePath)
+	return nil
+}
+
+func getMediaUrl(mediaId string) (string, error) {
+	accessToken := os.Getenv("WHATSAPP_ACCESS_TOKEN")
+	url := fmt.Sprintf("https://graph.facebook.com/v16.0/%s", mediaId)
+
+	client := resty.New()
 	resp, err := client.R().
 		SetHeader("Authorization", "Bearer "+accessToken).
 		Get(url)
 
 	if err != nil {
-		fmt.Println("Error getting media URL:", err)
-		return
+		return "", fmt.Errorf("error getting media URL: %v", err)
 	}
 
-	// Log the full response body
-	fmt.Printf("Media URL Response: %s\n", resp.String())
+	if resp.StatusCode() != http.StatusOK {
+		return "", fmt.Errorf("failed to get media URL, status code: %d", resp.StatusCode())
+	}
 
 	var mediaData map[string]interface{}
 	err = json.Unmarshal(resp.Body(), &mediaData)
 	if err != nil {
-		fmt.Println("Error parsing media URL JSON:", err)
-		return
+		return "", fmt.Errorf("error parsing media URL JSON: %v", err)
 	}
 
 	mediaUrl, urlExists := mediaData["url"].(string)
 	if !urlExists {
-		fmt.Println("No URL found in media data")
-		return
+		return "", fmt.Errorf("no URL found in media data")
 	}
 
-	fmt.Println("Media URL:", mediaUrl)
-
-	// Download the image
-	response, err := http.Get(mediaUrl)
-	if err != nil {
-		fmt.Println("Error downloading image:", err)
-		return
-	}
-	defer response.Body.Close()
-
-	// Check if response status is OK
-	if response.StatusCode != http.StatusOK {
-		fmt.Printf("Failed to download image, status code: %d\n", response.StatusCode)
-		return
-	}
-
-	// Create the file
-	filePath := filepath.Join(".", "downloaded_image.jpg")
-	absFilePath, err := filepath.Abs(filePath)
-	if err != nil {
-		fmt.Println("Error getting absolute file path:", err)
-		return
-	}
-
-	file, err := os.Create(absFilePath)
-	if err != nil {
-		fmt.Println("Error creating file:", err)
-		return
-	}
-	defer file.Close()
-
-	// Write the body to file
-	_, err = io.Copy(file, response.Body)
-	if err != nil {
-		fmt.Println("Error saving image:", err)
-		return
-	}
-
-	fmt.Printf("Downloaded image for phone number: %s to path: %s\n", phoneNumber, absFilePath)
+	return mediaUrl, nil
 }
 
-func sendMessage(phoneNumber, message string) {
-	accessToken := os.Getenv("WHATSAPP_ACCESS_TOKEN")
-	phoneNumberId := os.Getenv("WHATSAPP_PHONE_NUMBER_ID")
-	client := resty.New()
-	_, err := client.R().
-		SetAuthToken(accessToken).
-		SetBody(map[string]interface{}{
-			"messaging_product": "whatsapp",
-			"to":                phoneNumber,
-			"text":              map[string]string{"body": message},
-		}).
-		Post(fmt.Sprintf("https://graph.facebook.com/v13.0/%s/messages", phoneNumberId))
+// func sendMessage(phoneNumber, message string) {
+// 	accessToken := os.Getenv("WHATSAPP_ACCESS_TOKEN")
+// 	phoneNumberId := os.Getenv("WHATSAPP_PHONE_NUMBER_ID")
+// 	client := resty.New()
+// 	_, err := client.R().
+// 		SetAuthToken(accessToken).
+// 		SetBody(map[string]interface{}{
+// 			"messaging_product": "whatsapp",
+// 			"to":                phoneNumber,
+// 			"text":              map[string]string{"body": message},
+// 		}).
+// 		Post(fmt.Sprintf("https://graph.facebook.com/v13.0/%s/messages", phoneNumberId))
 
-	if err != nil {
-		fmt.Printf("Error sending message: %v\n", err)
-	}
-}
+// 	if err != nil {
+// 		fmt.Printf("Error sending message: %v\n", err)
+// 	}
+// }
+// func handleWebhook(c *gin.Context) {
+// 	// err := godotenv.Load()
+// 	// if err != nil {
+// 	// 	fmt.Println("Error loading .env file")
+// 	// 	c.String(http.StatusInternalServerError, "Internal Server Error")
+// 	// 	return
+// 	// }
+
+// 	mode := c.Query("hub.mode")
+// 	token := c.Query("hub.verify_token")
+// 	challenge := c.Query("hub.challenge")
+// 	verifyToken := os.Getenv("WHATSAPP_VERIFY_TOKEN")
+// 	if mode == "subscribe" && token == verifyToken {
+// 		c.String(http.StatusOK, challenge)
+// 		return
+// 	}
+
+// 	if c.Request.Method == http.MethodPost {
+// 		var body map[string]interface{}
+// 		if err := c.BindJSON(&body); err != nil {
+// 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+// 			return
+// 		}
+
+// 		fmt.Printf("Received Webhook: %v\n", body)
+
+// 		entry, entryExists := body["entry"].([]interface{})
+// 		if !entryExists || len(entry) == 0 {
+// 			c.JSON(http.StatusBadRequest, gin.H{"error": "No entry found"})
+// 			return
+// 		}
+
+// 		changes, changesExists := entry[0].(map[string]interface{})["changes"].([]interface{})
+// 		if !changesExists || len(changes) == 0 {
+// 			c.JSON(http.StatusBadRequest, gin.H{"error": "No changes found"})
+// 			return
+// 		}
+
+// 		value, valueExists := changes[0].(map[string]interface{})["value"].(map[string]interface{})
+// 		if !valueExists {
+// 			c.JSON(http.StatusBadRequest, gin.H{"error": "No value found"})
+// 			return
+// 		}
+
+// 		messages, messagesExists := value["messages"].([]interface{})
+// 		if !messagesExists || len(messages) == 0 {
+// 			c.JSON(http.StatusBadRequest, gin.H{"error": "No messages found"})
+// 			return
+// 		}
+
+// 		message := messages[0].(map[string]interface{})
+// 		messageType, messageTypeExists := message["type"].(string)
+// 		if !messageTypeExists || messageType != "image" {
+// 			c.JSON(http.StatusBadRequest, gin.H{"error": "Message is not an image"})
+// 			return
+// 		}
+
+// 		image, imageExists := message["image"].(map[string]interface{})
+// 		if !imageExists {
+// 			c.JSON(http.StatusBadRequest, gin.H{"error": "No image found in message"})
+// 			return
+// 		}
+
+// 		imageId, idExists := image["id"].(string)
+// 		if !idExists {
+// 			c.JSON(http.StatusBadRequest, gin.H{"error": "No image ID found"})
+// 			return
+// 		}
+
+// 		phoneNumber, phoneExists := message["from"].(string)
+// 		if !phoneExists {
+// 			c.JSON(http.StatusBadRequest, gin.H{"error": "No phone number found"})
+// 			return
+// 		}
+
+// 		mediaUrl, err := getMediaUrl(imageId)
+// 		if err != nil {
+// 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+// 			return
+// 		}
+
+// 		err = downloadImage(mediaUrl, phoneNumber)
+// 		if err != nil {
+// 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+// 			return
+// 		}
+// 		// nearest := cat(imageId)
+// 		// sendMessage(phoneNumber, nearest)
+
+// 		c.Status(http.StatusOK)
+// 	}
+// }
